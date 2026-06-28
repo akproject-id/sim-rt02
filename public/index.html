@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="SIM-RT.02 - Sistem Informasi Warga RT.02">
+    <title>Login - SIM-RT.02</title>
+    <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+    <div class="login-container">
+        <div class="login-card">
+            <div class="logo">
+                <div class="logo-icon">🏘️</div>
+                <h1>SIM-RT.02</h1>
+                <p>Sistem Informasi Warga RT.02</p>
+            </div>
+
+            <form id="loginForm">
+                <div class="form-group">
+                    <label for="username">Username</label>
+                    <input type="text" id="username" class="form-control" placeholder="Masukkan username" required autocomplete="username">
+                </div>
+
+                <div class="form-group">
+                    <label for="password">Password</label>
+                    <input type="password" id="password" class="form-control" placeholder="Masukkan password" required autocomplete="current-password">
+                </div>
+
+                <div id="loginError" class="form-error" style="display:none; text-align:center; margin-bottom:1rem;"></div>
+
+                <button type="submit" id="loginBtn" class="btn btn-primary btn-lg btn-block">
+                    Masuk
+                </button>
+            </form>
+
+            <p style="text-align:center; margin-top:1.5rem; font-size:0.75rem; color:var(--text-muted);">
+                © 2026 RT.02 — Fase 1 MVP
+            </p>
+        </div>
+    </div>
+
+    <div class="toast-container" id="toastContainer"></div>
+
+    <script>
+        document.getElementById('loginForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const btn = document.getElementById('loginBtn');
+            const errEl = document.getElementById('loginError');
+            errEl.style.display = 'none';
+            btn.disabled = true;
+            btn.innerHTML = '<span class="loading-spinner"></span> Memproses...';
+
+            try {
+                const res = await fetch('/api/auth/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        username: document.getElementById('username').value,
+                        password: document.getElementById('password').value
+                    })
+                });
+                const data = await res.json();
+                if (res.ok && data.success) {
+                    window.location.href = '/admin/dashboard';
+                } else {
+                    errEl.textContent = data.error || 'Login gagal.';
+                    errEl.style.display = 'block';
+                }
+            } catch (err) {
+                errEl.textContent = 'Koneksi gagal. Periksa server.';
+                errEl.style.display = 'block';
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = 'Masuk';
+            }
+        });
+    </script>
+</body>
+</html>

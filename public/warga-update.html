@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Update Data Warga RT.02">
+    <title>Update Data - SIM-RT.02</title>
+    <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+    <div class="warga-container">
+        <div class="warga-header">
+            <div class="logo-icon">🏘️</div>
+            <h1>Update Data Warga</h1>
+            <p>RT.02 — Pengkinian Data Mandiri</p>
+        </div>
+
+        <!-- Loading State -->
+        <div id="loadingState" class="page-loading">
+            <div style="text-align:center;">
+                <div class="loading-spinner" style="width:40px;height:40px;border-width:3px;"></div>
+                <p style="margin-top:1rem;color:var(--text-muted);">Memvalidasi link...</p>
+            </div>
+        </div>
+
+        <!-- Error State -->
+        <div id="errorState" style="display:none;">
+            <div class="card" style="text-align:center;padding:2rem;">
+                <div style="font-size:3rem;margin-bottom:1rem;">⚠️</div>
+                <h2 style="color:var(--danger);margin-bottom:0.5rem;">Link Tidak Valid</h2>
+                <p id="errorMessage" style="color:var(--text-muted);font-size:0.875rem;"></p>
+            </div>
+        </div>
+
+        <!-- Form State -->
+        <div id="formState" style="display:none;">
+            <div class="warga-info-card">
+                <div style="display:flex;align-items:center;gap:0.75rem;margin-bottom:1rem;">
+                    <span style="font-size:1.5rem;">👨‍👩‍👧‍👦</span>
+                    <div>
+                        <div class="fw-700" id="kkName">-</div>
+                        <div class="text-sm text-muted" id="kkAddress">-</div>
+                    </div>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">No. KK</span>
+                    <span class="info-value" id="kkNumber">-</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">Link berlaku hingga</span>
+                    <span class="info-value" id="kkExpiry" style="color:var(--warning);">-</span>
+                </div>
+            </div>
+
+            <p style="font-size:0.8125rem;color:var(--text-muted);margin-bottom:1rem;">
+                Silakan perbarui data anggota keluarga di bawah ini. Data yang diubah akan dikirim ke Admin RT untuk diverifikasi.
+            </p>
+
+            <form id="updateForm">
+                <div id="membersContainer">
+                    <!-- Member cards will be injected here -->
+                </div>
+
+                <button type="submit" class="btn btn-primary btn-lg btn-block" id="submitBtn" style="margin-top:1.5rem;">
+                    Kirim Perubahan Data
+                </button>
+            </form>
+        </div>
+
+        <!-- Success State -->
+        <div id="successState" style="display:none;">
+            <div class="warga-success">
+                <div class="success-icon">✅</div>
+                <h2>Data Berhasil Dikirim!</h2>
+                <p style="color:var(--text-muted);font-size:0.875rem;margin-top:0.5rem;">
+                    Perubahan data Anda sudah masuk ke antrian verifikasi. Admin RT akan meninjau dan menyetujui perubahan tersebut.
+                </p>
+                <p style="color:var(--text-muted);font-size:0.75rem;margin-top:1.5rem;">
+                    Terima kasih atas partisipasi Anda dalam pengkinian data warga RT.02.
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <div class="toast-container" id="toastContainer"></div>
+
+    <script>
+        const token = window.location.pathname.split('/update/')[1];
+        let originalData = {};
+
+        async function init() {
+            if (!token) {
+                showError('Link tidak valid.');
+                return;
+            }
+
+            try {
+                const res = await fetch(`/api/token/validate/${token}`);
+                const data = await res.json();
+
+                if (!res.ok) {
+                    showError(data.error || 'Link tidak valid.');
+                    return;
+                }
+
+                document.getElementById('kkName').textContent = data.kk.nama_kepala;
+                document.getElementById('kkAddress').textContent = `Blok ${data.kk.blok} No. ${data.kk.nomor_rumah}`;
+                document.getElementById('kkNumber').textContent = data.kk.nomor_kk || '-';
+
+                const expDate = new Date(data.expired_at);
+                document.getElementById('kkExpiry').textContent = expDate.toLocaleString('id-ID', {
+                    day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit'
+                });
+
+                renderMembers(data.anggota);
+
+                document.getElementById('loadingState').style.display = 'none';
+                document.getElementById('formState').style.display = 'block';
+            } catch (err) {
+                showError('Gagal memvalidasi link. Periksa koneksi internet Anda.');
+            }
+        }
+
+        function showError(msg) {
+            document.getElementById('loadingState').style.display = 'none';
+            document.getElementById('errorMessage').textContent = msg;
+            document.getElementById('errorState').style.display = 'block';
+        }
+
+        function renderMembers(members) {
+            const container = document.getElementById('membersContainer');
+            container.innerHTML = '';
+
+            members.forEach((m, idx) => {
+                originalData[m.id] = { ...m };
+
+                const card = document.createElement('div');
+                card.className = 'warga-member-card animate-slideUp';
+                card.style.animationDelay = `${idx * 0.1}s`;
+                card.innerHTML = `
+                    <h3>
+                        ${m.nama_lengkap}
+                        <span class="member-badge">${m.hubungan_keluarga || '-'}</span>
+                    </h3>
+                    <div class="form-group">
+                        <label>Nama Lengkap</label>
+                        <input type="text" class="form-control" name="nama_lengkap_${m.id}" value="${m.nama_lengkap || ''}">
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Tempat Lahir</label>
+                            <input type="text" class="form-control" name="tempat_lahir_${m.id}" value="${m.tempat_lahir || ''}">
+                        </div>
+                        <div class="form-group">
+                            <label>Tanggal Lahir</label>
+                            <input type="date" class="form-control" name="tanggal_lahir_${m.id}" value="${m.tanggal_lahir || ''}">
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Jenis Kelamin</label>
+                            <select class="form-control" name="jenis_kelamin_${m.id}">
+                                <option value="">-- Pilih --</option>
+                                <option value="L" ${m.jenis_kelamin === 'L' ? 'selected' : ''}>Laki-laki</option>
+                                <option value="P" ${m.jenis_kelamin === 'P' ? 'selected' : ''}>Perempuan</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Agama</label>
+                            <select class="form-control" name="agama_${m.id}">
+                                <option value="">-- Pilih --</option>
+                                ${['Islam','Kristen','Katolik','Hindu','Buddha','Konghucu','Lainnya'].map(a =>
+                                    `<option value="${a}" ${m.agama === a ? 'selected' : ''}>${a}</option>`
+                                ).join('')}
+                            </select>
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Status Perkawinan</label>
+                            <select class="form-control" name="status_perkawinan_${m.id}">
+                                <option value="">-- Pilih --</option>
+                                ${['Belum Kawin','Kawin','Cerai Hidup','Cerai Mati'].map(s =>
+                                    `<option value="${s}" ${m.status_perkawinan === s ? 'selected' : ''}>${s}</option>`
+                                ).join('')}
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Pendidikan</label>
+                            <input type="text" class="form-control" name="pendidikan_terakhir_${m.id}" value="${m.pendidikan_terakhir || ''}" placeholder="SD/SMP/SMA/D3/S1/S2">
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Pekerjaan</label>
+                            <input type="text" class="form-control" name="pekerjaan_${m.id}" value="${m.pekerjaan || ''}">
+                        </div>
+                        <div class="form-group">
+                            <label>No. HP</label>
+                            <input type="tel" class="form-control" name="no_hp_${m.id}" value="${m.no_hp || ''}" placeholder="08xxxxxxxxxx">
+                        </div>
+                    </div>
+                `;
+                container.appendChild(card);
+            });
+        }
+
+        document.getElementById('updateForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const btn = document.getElementById('submitBtn');
+            btn.disabled = true;
+            btn.innerHTML = '<span class="loading-spinner"></span> Mengirim...';
+
+            const updates = [];
+            const fields = ['nama_lengkap','tempat_lahir','tanggal_lahir','jenis_kelamin','agama','status_perkawinan','pendidikan_terakhir','pekerjaan','no_hp'];
+
+            for (const [wargaId, orig] of Object.entries(originalData)) {
+                const data_baru = {};
+                let hasChanges = false;
+
+                for (const field of fields) {
+                    const input = document.querySelector(`[name="${field}_${wargaId}"]`);
+                    if (input) {
+                        const newVal = input.value || null;
+                        const oldVal = orig[field] || null;
+                        data_baru[field] = newVal;
+                        if (newVal !== oldVal) hasChanges = true;
+                    }
+                }
+
+                if (hasChanges) {
+                    updates.push({ warga_id: parseInt(wargaId), data_baru });
+                }
+            }
+
+            if (updates.length === 0) {
+                showToast('Tidak ada perubahan data.', 'warning');
+                btn.disabled = false;
+                btn.innerHTML = 'Kirim Perubahan Data';
+                return;
+            }
+
+            try {
+                const res = await fetch(`/api/update-request/submit/${token}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ updates })
+                });
+                const data = await res.json();
+
+                if (res.ok && data.success) {
+                    document.getElementById('formState').style.display = 'none';
+                    document.getElementById('successState').style.display = 'block';
+                } else {
+                    showToast(data.error || 'Gagal mengirim data.', 'error');
+                    btn.disabled = false;
+                    btn.innerHTML = 'Kirim Perubahan Data';
+                }
+            } catch (err) {
+                showToast('Koneksi gagal. Coba lagi.', 'error');
+                btn.disabled = false;
+                btn.innerHTML = 'Kirim Perubahan Data';
+            }
+        });
+
+        function showToast(msg, type = 'info') {
+            const container = document.getElementById('toastContainer');
+            const icons = { success: '✅', error: '❌', warning: '⚠️', info: 'ℹ️' };
+            const toast = document.createElement('div');
+            toast.className = `toast ${type}`;
+            toast.innerHTML = `
+                <span class="toast-icon">${icons[type]}</span>
+                <span>${msg}</span>
+                <button class="toast-close" onclick="this.parentElement.remove()">✕</button>
+            `;
+            container.appendChild(toast);
+            setTimeout(() => toast.remove(), 5000);
+        }
+
+        init();
+    </script>
+</body>
+</html>

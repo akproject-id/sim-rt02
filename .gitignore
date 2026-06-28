@@ -1,0 +1,7 @@
+node_modules/
+*.db
+uploads/ktp/*
+uploads/kk/*
+!uploads/ktp/.gitkeep
+!uploads/kk/.gitkeep
+.env

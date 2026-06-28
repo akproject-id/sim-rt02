@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="SIM-RT.02 - Dashboard Admin">
+    <title>Admin - SIM-RT.02</title>
+    <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+    <div class="admin-layout">
+        <!-- Mobile Overlay -->
+        <div class="mobile-overlay" id="mobileOverlay" onclick="toggleSidebar()"></div>
+
+        <!-- Sidebar -->
+        <aside class="sidebar" id="sidebar">
+            <div class="sidebar-brand">
+                <div class="brand-icon">🏘️</div>
+                <div>
+                    <h2>SIM-RT.02</h2>
+                    <small>Sistem Informasi Warga</small>
+                </div>
+            </div>
+
+            <nav class="sidebar-nav">
+                <div class="nav-section">
+                    <div class="nav-section-title">Menu Utama</div>
+                    <a class="nav-item active" data-page="dashboard" onclick="navigateTo('dashboard')">
+                        <span class="icon">📊</span> Dashboard
+                    </a>
+                    <a class="nav-item" data-page="search" onclick="navigateTo('search')">
+                        <span class="icon">🔍</span> Pencarian
+                    </a>
+                </div>
+
+                <div class="nav-section">
+                    <div class="nav-section-title">Master Data</div>
+                    <a class="nav-item" data-page="rumah" onclick="navigateTo('rumah')">
+                        <span class="icon">🏠</span> Data Rumah
+                    </a>
+                    <a class="nav-item" data-page="kk" onclick="navigateTo('kk')">
+                        <span class="icon">👨‍👩‍👧‍👦</span> Data KK
+                    </a>
+                    <a class="nav-item" data-page="warga" onclick="navigateTo('warga')">
+                        <span class="icon">👤</span> Data Warga
+                    </a>
+                </div>
+
+                <div class="nav-section">
+                    <div class="nav-section-title">Pengkinian Data</div>
+                    <a class="nav-item" data-page="generate-link" onclick="navigateTo('generate-link')">
+                        <span class="icon">🔗</span> Generate Link
+                    </a>
+                    <a class="nav-item" data-page="approval" onclick="navigateTo('approval')">
+                        <span class="icon">✅</span> Approval
+                        <span class="nav-badge" id="pendingBadge" style="display:none;">0</span>
+                    </a>
+                </div>
+
+                <div class="nav-section">
+                    <div class="nav-section-title">Laporan</div>
+                    <a class="nav-item" data-page="export" onclick="navigateTo('export')">
+                        <span class="icon">📥</span> Export Data
+                    </a>
+                </div>
+            </nav>
+
+            <div class="sidebar-footer">
+                <div class="admin-info">
+                    <div class="admin-avatar" id="adminAvatar">A</div>
+                    <div>
+                        <div class="admin-name" id="adminName">Admin</div>
+                        <div class="admin-role">Administrator</div>
+                    </div>
+                    <button class="btn btn-ghost btn-icon" onclick="logout()" title="Logout" style="margin-left:auto;">🚪</button>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Header -->
+            <header class="main-header">
+                <div style="display:flex;align-items:center;gap:0.75rem;">
+                    <button class="hamburger" onclick="toggleSidebar()">☰</button>
+                    <h1 class="page-title" id="pageTitle">Dashboard</h1>
+                </div>
+                <div class="header-actions">
+                    <div class="search-bar" id="globalSearch">
+                        <span class="search-icon">🔍</span>
+                        <input type="text" id="globalSearchInput" placeholder="Cari: A12/22, nama, NIK, HP..." onkeydown="if(event.key==='Enter') doGlobalSearch()">
+                    </div>
+                </div>
+            </header>
+
+            <!-- Page Content (SPA) -->
+            <div class="page-content" id="pageContent">
+                <!-- Content loaded dynamically -->
+            </div>
+        </main>
+    </div>
+
+    <!-- Modal Container -->
+    <div class="modal-overlay" id="modalOverlay" onclick="if(event.target===this)closeModal()">
+        <div class="modal" id="modalContent">
+            <div class="modal-header">
+                <h3 id="modalTitle">Modal</h3>
+                <button class="btn btn-ghost btn-icon" onclick="closeModal()">✕</button>
+            </div>
+            <div class="modal-body" id="modalBody"></div>
+            <div class="modal-footer" id="modalFooter"></div>
+        </div>
+    </div>
+
+    <!-- Toast Container -->
+    <div class="toast-container" id="toastContainer"></div>
+
+    <script src="/js/app.js"></script>
+</body>
+</html>
