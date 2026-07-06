@@ -2,7 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const session = require('express-session');
 const path = require('path');
-const { getDb, closeDb } = require('./database/db');
+const { initializeSchema, closeDb } = require('./database/db');
 const { seed } = require('./database/seed');
 
 const app = express();
@@ -30,15 +30,6 @@ app.use((req, res, next) => {
     next();
 });
 
-// ============ INITIALIZE DATABASE ============
-try {
-    const db = getDb();
-    seed();
-    console.log('✅ Database ready');
-} catch (err) {
-    console.error('❌ Database initialization failed:', err.message);
-}
-
 // ============ ROUTES ============
 const authRoutes = require('./routes/auth');
 const dashboardRoutes = require('./routes/dashboard');
@@ -62,7 +53,6 @@ app.use('/api/export', exportRoutes);
 
 // ============ PAGE ROUTES ============
 const { requireAuth } = require('./middleware/auth');
-const { validateToken } = require('./middleware/token-auth');
 
 // Login page
 app.get('/login', (req, res) => {
@@ -100,27 +90,40 @@ app.use((err, req, res, next) => {
     res.status(500).json({ error: 'Terjadi kesalahan server. Silakan coba lagi.' });
 });
 
-// ============ START SERVER ============
-app.listen(PORT, () => {
-    console.log(`
+// ============ INITIALIZE DATABASE & START SERVER ============
+async function startServer() {
+    try {
+        await initializeSchema();
+        await seed();
+        console.log('✅ Database ready');
+    } catch (err) {
+        console.error('❌ Database initialization failed:', err.message);
+        process.exit(1);
+    }
+
+    app.listen(PORT, () => {
+        console.log(`
 ╔══════════════════════════════════════════════╗
 ║     SIM-RT.02 - Sistem Informasi Warga      ║
 ║     Fase 1: MVP                              ║
 ╠══════════════════════════════════════════════╣
 ║  🌐 Server: http://localhost:${PORT}            ║
 ║  👤 Admin : admin / admin123                 ║
-║  📁 DB    : sim-rt02.db                      ║
+║  📁 DB    : Supabase PostgreSQL              ║
 ╚══════════════════════════════════════════════╝
-    `);
-});
+        `);
+    });
+}
+
+startServer();
 
 // Graceful shutdown
-process.on('SIGINT', () => {
-    closeDb();
+process.on('SIGINT', async () => {
+    await closeDb();
     process.exit(0);
 });
 
-process.on('SIGTERM', () => {
-    closeDb();
+process.on('SIGTERM', async () => {
+    await closeDb();
     process.exit(0);
 });

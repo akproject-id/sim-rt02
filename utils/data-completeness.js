@@ -49,15 +49,21 @@ function checkCompleteness(wargaData) {
 }
 
 /**
- * Update flag is_data_lengkap di database
+ * Update flag is_data_lengkap di database.
+ * @param {Function} queryFn - async function(text, params) that executes a query (pool.query or client.query)
+ * @param {number} wargaId
+ * @returns {Promise<boolean>}
  */
-function updateCompletenessFlag(db, wargaId) {
-    const warga = db.prepare('SELECT * FROM warga WHERE id = ?').get(wargaId);
+async function updateCompletenessFlag(queryFn, wargaId) {
+    const { rows } = await queryFn('SELECT * FROM warga WHERE id = $1', [wargaId]);
+    const warga = rows[0];
     if (!warga) return false;
 
     const { isComplete } = checkCompleteness(warga);
-    db.prepare('UPDATE warga SET is_data_lengkap = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
-        .run(isComplete ? 1 : 0, wargaId);
+    await queryFn(
+        'UPDATE warga SET is_data_lengkap = $1, updated_at = NOW() WHERE id = $2',
+        [isComplete, wargaId]
+    );
 
     return isComplete;
 }
@@ -65,22 +71,33 @@ function updateCompletenessFlag(db, wargaId) {
 /**
  * Batch update semua flag kelengkapan
  */
-function updateAllCompletenessFlags(db) {
-    const allWarga = db.prepare('SELECT * FROM warga WHERE status = ?').all('AKTIF');
+async function updateAllCompletenessFlags() {
+    const { query, getClient } = require('../database/db');
+
+    const { rows: allWarga } = await query("SELECT * FROM warga WHERE status = 'AKTIF'");
     let complete = 0;
     let incomplete = 0;
 
-    const updateStmt = db.prepare('UPDATE warga SET is_data_lengkap = ? WHERE id = ?');
-    const transaction = db.transaction(() => {
+    const client = await getClient();
+    try {
+        await client.query('BEGIN');
         for (const w of allWarga) {
             const { isComplete } = checkCompleteness(w);
-            updateStmt.run(isComplete ? 1 : 0, w.id);
+            await client.query(
+                'UPDATE warga SET is_data_lengkap = $1 WHERE id = $2',
+                [isComplete, w.id]
+            );
             if (isComplete) complete++;
             else incomplete++;
         }
-    });
+        await client.query('COMMIT');
+    } catch (err) {
+        await client.query('ROLLBACK');
+        throw err;
+    } finally {
+        client.release();
+    }
 
-    transaction();
     return { complete, incomplete, total: allWarga.length };
 }
 

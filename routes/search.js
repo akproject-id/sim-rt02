@@ -1,12 +1,12 @@
 const express = require('express');
-const { getDb } = require('../database/db');
+const { query } = require('../database/db');
 const { requireAuth } = require('../middleware/auth');
 const { parseSearchQuery, buildSearchQuery } = require('../utils/smart-search-parser');
 
 const router = express.Router();
 
 // GET /api/search?q=A12/22
-router.get('/', requireAuth, (req, res) => {
+router.get('/', requireAuth, async (req, res) => {
     try {
         const { q } = req.query;
 
@@ -17,8 +17,7 @@ router.get('/', requireAuth, (req, res) => {
         const parsed = parseSearchQuery(q);
         const { sql, params } = buildSearchQuery(parsed);
 
-        const db = getDb();
-        const rows = db.prepare(sql).all(...params);
+        const { rows } = await query(sql, params);
 
         res.json({
             data: rows,

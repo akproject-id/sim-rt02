@@ -1,28 +1,28 @@
 const express = require('express');
 const crypto = require('crypto');
-const { getDb } = require('../database/db');
+const { query } = require('../database/db');
 const { requireAuth } = require('../middleware/auth');
 const { validateToken } = require('../middleware/token-auth');
 
 const router = express.Router();
 
 // POST /api/token/generate - Admin generates token link
-router.post('/generate', requireAuth, (req, res) => {
+router.post('/generate', requireAuth, async (req, res) => {
     try {
-        const db = getDb();
         const { kk_id } = req.body;
 
         if (!kk_id) {
             return res.status(400).json({ error: 'KK ID wajib diisi.' });
         }
 
-        const kk = db.prepare(`
+        const { rows: kkRows } = await query(`
             SELECT kk.*, r.blok, r.nomor_rumah
             FROM kepala_keluarga kk
             JOIN rumah r ON kk.rumah_id = r.id
-            WHERE kk.id = ? AND kk.status = 'AKTIF'
-        `).get(kk_id);
+            WHERE kk.id = $1 AND kk.status = 'AKTIF'
+        `, [kk_id]);
 
+        const kk = kkRows[0];
         if (!kk) return res.status(404).json({ error: 'KK tidak ditemukan atau tidak aktif.' });
 
         // Generate unique token
@@ -32,10 +32,10 @@ router.post('/generate', requireAuth, (req, res) => {
         const expiryHours = parseInt(process.env.TOKEN_EXPIRY_HOURS) || 72;
         const expiredAt = new Date(Date.now() + expiryHours * 60 * 60 * 1000).toISOString();
 
-        db.prepare(`
+        await query(`
             INSERT INTO token_link (kk_id, token, expired_at, is_used, generated_by)
-            VALUES (?, ?, ?, 0, ?)
-        `).run(kk_id, token, expiredAt, req.session.adminId);
+            VALUES ($1, $2, $3, FALSE, $4)
+        `, [kk_id, token, expiredAt, req.session.adminId]);
 
         const baseUrl = process.env.BASE_URL || `http://localhost:${process.env.PORT || 3000}`;
         const updateUrl = `${baseUrl}/update/${token}`;
@@ -60,25 +60,24 @@ router.post('/generate', requireAuth, (req, res) => {
 });
 
 // GET /api/token/validate/:token - Validate token and return KK data
-router.get('/validate/:token', validateToken, (req, res) => {
+router.get('/validate/:token', validateToken, async (req, res) => {
     try {
-        const db = getDb();
         const tokenData = req.tokenData;
 
         // Get all family members
-        const anggota = db.prepare(`
+        const { rows: anggota } = await query(`
             SELECT w.id, w.nik, w.nama_lengkap, w.tempat_lahir, w.tanggal_lahir,
                    w.jenis_kelamin, w.agama, w.status_perkawinan, w.pendidikan_terakhir,
                    w.pekerjaan, w.no_hp, w.hubungan_keluarga, w.status_tinggal
             FROM warga w
-            WHERE w.kk_id = ? AND w.status = 'AKTIF'
+            WHERE w.kk_id = $1 AND w.status = 'AKTIF'
             ORDER BY CASE w.hubungan_keluarga
                 WHEN 'Kepala Keluarga' THEN 1
                 WHEN 'Istri' THEN 2
                 WHEN 'Anak' THEN 3
                 ELSE 4
             END
-        `).all(tokenData.kk_id);
+        `, [tokenData.kk_id]);
 
         res.json({
             valid: true,
@@ -98,10 +97,9 @@ router.get('/validate/:token', validateToken, (req, res) => {
 });
 
 // GET /api/token/list - List all tokens (admin)
-router.get('/list', requireAuth, (req, res) => {
+router.get('/list', requireAuth, async (req, res) => {
     try {
-        const db = getDb();
-        const tokens = db.prepare(`
+        const { rows: tokens } = await query(`
             SELECT tl.*, kk.nama_kepala, kk.nomor_kk, r.blok, r.nomor_rumah,
                    a.nama_lengkap as generated_by_name
             FROM token_link tl
@@ -110,7 +108,7 @@ router.get('/list', requireAuth, (req, res) => {
             JOIN admin a ON tl.generated_by = a.id
             ORDER BY tl.created_at DESC
             LIMIT 50
-        `).all();
+        `);
 
         // Add status info
         const now = new Date();

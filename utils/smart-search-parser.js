@@ -53,7 +53,6 @@ function parseSearchQuery(input) {
 
             if (tokens.length >= 2) {
                 // Ada nomor rumah setelah blok
-                const nomor = tokens[1].replace(/^0+/, '') || tokens[1]; // Keep leading zeros for matching
                 return {
                     type: 'address',
                     blok: blok,
@@ -77,6 +76,7 @@ function parseSearchQuery(input) {
 
 /**
  * Build SQL query berdasarkan hasil parsing
+ * Uses PostgreSQL $N parameterized placeholders
  */
 function buildSearchQuery(parsed) {
     const baseSelect = `
@@ -107,37 +107,37 @@ function buildSearchQuery(parsed) {
     switch (parsed.type) {
         case 'address':
             return {
-                sql: baseSelect + ` WHERE UPPER(r.blok) = ? AND r.nomor_rumah = ? ORDER BY w.hubungan_keluarga`,
+                sql: baseSelect + ` WHERE UPPER(r.blok) = $1 AND r.nomor_rumah = $2 ORDER BY w.hubungan_keluarga`,
                 params: [parsed.blok, parsed.nomor]
             };
 
         case 'blok':
             return {
-                sql: baseSelect + ` WHERE UPPER(r.blok) = ? ORDER BY r.nomor_rumah, kk.nama_kepala`,
+                sql: baseSelect + ` WHERE UPPER(r.blok) = $1 ORDER BY r.nomor_rumah, kk.nama_kepala`,
                 params: [parsed.value]
             };
 
         case 'nik':
             return {
-                sql: baseSelect + ` WHERE w.nik = ?`,
+                sql: baseSelect + ` WHERE w.nik = $1`,
                 params: [parsed.value]
             };
 
         case 'phone':
             return {
-                sql: baseSelect + ` WHERE w.no_hp LIKE ?`,
+                sql: baseSelect + ` WHERE w.no_hp LIKE $1`,
                 params: [`%${parsed.value}%`]
             };
 
         case 'nomor_kk':
             return {
-                sql: baseSelect + ` WHERE kk.nomor_kk LIKE ?`,
+                sql: baseSelect + ` WHERE kk.nomor_kk LIKE $1`,
                 params: [`%${parsed.value}%`]
             };
 
         case 'name':
             return {
-                sql: baseSelect + ` WHERE w.nama_lengkap LIKE ? ORDER BY w.nama_lengkap`,
+                sql: baseSelect + ` WHERE w.nama_lengkap ILIKE $1 ORDER BY w.nama_lengkap`,
                 params: [`%${parsed.value}%`]
             };
 

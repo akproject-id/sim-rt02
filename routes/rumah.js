@@ -1,13 +1,12 @@
 const express = require('express');
-const { getDb } = require('../database/db');
+const { query } = require('../database/db');
 const { requireAuth } = require('../middleware/auth');
 
 const router = express.Router();
 
 // GET /api/rumah - List all rumah
-router.get('/', requireAuth, (req, res) => {
+router.get('/', requireAuth, async (req, res) => {
     try {
-        const db = getDb();
         const { blok, status } = req.query;
 
         let sql = `
@@ -22,12 +21,12 @@ router.get('/', requireAuth, (req, res) => {
         const conditions = [];
 
         if (blok) {
-            conditions.push('UPPER(r.blok) = ?');
             params.push(blok.toUpperCase());
+            conditions.push(`UPPER(r.blok) = $${params.length}`);
         }
         if (status) {
-            conditions.push('r.status = ?');
             params.push(status);
+            conditions.push(`r.status = $${params.length}`);
         }
 
         if (conditions.length > 0) {
@@ -36,12 +35,12 @@ router.get('/', requireAuth, (req, res) => {
 
         sql += ' GROUP BY r.id ORDER BY r.blok, CAST(r.nomor_rumah AS INTEGER)';
 
-        const rows = db.prepare(sql).all(...params);
+        const result = await query(sql, params);
 
         // Get distinct blok for filter dropdown
-        const blokList = db.prepare('SELECT DISTINCT blok FROM rumah ORDER BY blok').all();
+        const blokResult = await query('SELECT DISTINCT blok FROM rumah ORDER BY blok');
 
-        res.json({ data: rows, blokList: blokList.map(b => b.blok) });
+        res.json({ data: result.rows, blokList: blokResult.rows.map(b => b.blok) });
     } catch (err) {
         console.error('Error fetching rumah:', err);
         res.status(500).json({ error: 'Gagal memuat data rumah.' });
@@ -49,21 +48,19 @@ router.get('/', requireAuth, (req, res) => {
 });
 
 // GET /api/rumah/:id
-router.get('/:id', requireAuth, (req, res) => {
+router.get('/:id', requireAuth, async (req, res) => {
     try {
-        const db = getDb();
-        const rumah = db.prepare('SELECT * FROM rumah WHERE id = ?').get(req.params.id);
-        if (!rumah) return res.status(404).json({ error: 'Rumah tidak ditemukan.' });
-        res.json(rumah);
+        const { rows } = await query('SELECT * FROM rumah WHERE id = $1', [req.params.id]);
+        if (!rows[0]) return res.status(404).json({ error: 'Rumah tidak ditemukan.' });
+        res.json(rows[0]);
     } catch (err) {
         res.status(500).json({ error: 'Gagal memuat data rumah.' });
     }
 });
 
 // POST /api/rumah
-router.post('/', requireAuth, (req, res) => {
+router.post('/', requireAuth, async (req, res) => {
     try {
-        const db = getDb();
         const { blok, nomor_rumah, status, catatan } = req.body;
 
         if (!blok || !nomor_rumah) {
@@ -71,23 +68,24 @@ router.post('/', requireAuth, (req, res) => {
         }
 
         // Check duplicate
-        const existing = db.prepare(
-            'SELECT id FROM rumah WHERE UPPER(blok) = ? AND nomor_rumah = ?'
-        ).get(blok.toUpperCase(), nomor_rumah);
+        const { rows: existing } = await query(
+            'SELECT id FROM rumah WHERE UPPER(blok) = $1 AND nomor_rumah = $2',
+            [blok.toUpperCase(), nomor_rumah]
+        );
 
-        if (existing) {
+        if (existing.length > 0) {
             return res.status(409).json({ error: `Rumah ${blok}/${nomor_rumah} sudah terdaftar.` });
         }
 
-        const result = db.prepare(`
+        const { rows } = await query(`
             INSERT INTO rumah (blok, nomor_rumah, status, catatan)
-            VALUES (?, ?, ?, ?)
-        `).run(blok.toUpperCase(), nomor_rumah, status || 'KOSONG', catatan || null);
+            VALUES ($1, $2, $3, $4) RETURNING id
+        `, [blok.toUpperCase(), nomor_rumah, status || 'KOSONG', catatan || null]);
 
         res.status(201).json({
             success: true,
             message: `Rumah ${blok}/${nomor_rumah} berhasil ditambahkan.`,
-            id: result.lastInsertRowid
+            id: rows[0].id
         });
     } catch (err) {
         console.error('Error creating rumah:', err);
@@ -96,39 +94,40 @@ router.post('/', requireAuth, (req, res) => {
 });
 
 // PUT /api/rumah/:id
-router.put('/:id', requireAuth, (req, res) => {
+router.put('/:id', requireAuth, async (req, res) => {
     try {
-        const db = getDb();
         const { blok, nomor_rumah, status, catatan } = req.body;
 
-        const existing = db.prepare('SELECT * FROM rumah WHERE id = ?').get(req.params.id);
+        const { rows: existingRows } = await query('SELECT * FROM rumah WHERE id = $1', [req.params.id]);
+        const existing = existingRows[0];
         if (!existing) return res.status(404).json({ error: 'Rumah tidak ditemukan.' });
 
         // Check duplicate (exclude current)
         if (blok && nomor_rumah) {
-            const dup = db.prepare(
-                'SELECT id FROM rumah WHERE UPPER(blok) = ? AND nomor_rumah = ? AND id != ?'
-            ).get(blok.toUpperCase(), nomor_rumah, req.params.id);
-            if (dup) {
+            const { rows: dupRows } = await query(
+                'SELECT id FROM rumah WHERE UPPER(blok) = $1 AND nomor_rumah = $2 AND id != $3',
+                [blok.toUpperCase(), nomor_rumah, req.params.id]
+            );
+            if (dupRows.length > 0) {
                 return res.status(409).json({ error: `Rumah ${blok}/${nomor_rumah} sudah terdaftar.` });
             }
         }
 
-        db.prepare(`
+        await query(`
             UPDATE rumah SET
-                blok = COALESCE(?, blok),
-                nomor_rumah = COALESCE(?, nomor_rumah),
-                status = COALESCE(?, status),
-                catatan = ?,
-                updated_at = CURRENT_TIMESTAMP
-            WHERE id = ?
-        `).run(
+                blok = COALESCE($1, blok),
+                nomor_rumah = COALESCE($2, nomor_rumah),
+                status = COALESCE($3, status),
+                catatan = $4,
+                updated_at = NOW()
+            WHERE id = $5
+        `, [
             blok ? blok.toUpperCase() : null,
             nomor_rumah || null,
             status || null,
             catatan !== undefined ? catatan : existing.catatan,
             req.params.id
-        );
+        ]);
 
         res.json({ success: true, message: 'Data rumah berhasil diperbarui.' });
     } catch (err) {
@@ -138,22 +137,21 @@ router.put('/:id', requireAuth, (req, res) => {
 });
 
 // DELETE /api/rumah/:id
-router.delete('/:id', requireAuth, (req, res) => {
+router.delete('/:id', requireAuth, async (req, res) => {
     try {
-        const db = getDb();
-
         // Check if rumah has KK
-        const kkCount = db.prepare(
-            'SELECT COUNT(*) as count FROM kepala_keluarga WHERE rumah_id = ? AND status = ?'
-        ).get(req.params.id, 'AKTIF');
+        const { rows: kkRows } = await query(
+            "SELECT COUNT(*) as count FROM kepala_keluarga WHERE rumah_id = $1 AND status = 'AKTIF'",
+            [req.params.id]
+        );
 
-        if (kkCount.count > 0) {
+        if (parseInt(kkRows[0].count) > 0) {
             return res.status(400).json({
                 error: 'Rumah masih memiliki KK aktif. Pindahkan atau nonaktifkan KK terlebih dahulu.'
             });
         }
 
-        db.prepare('DELETE FROM rumah WHERE id = ?').run(req.params.id);
+        await query('DELETE FROM rumah WHERE id = $1', [req.params.id]);
         res.json({ success: true, message: 'Data rumah berhasil dihapus.' });
     } catch (err) {
         console.error('Error deleting rumah:', err);

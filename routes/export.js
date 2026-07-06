@@ -1,6 +1,6 @@
 const express = require('express');
 const ExcelJS = require('exceljs');
-const { getDb } = require('../database/db');
+const { query } = require('../database/db');
 const { requireAuth } = require('../middleware/auth');
 const { createPdfDoc, drawKopSurat, drawTitle, drawTable, drawFooter, addPageNumbers } = require('../utils/pdf-template');
 
@@ -9,7 +9,6 @@ const router = express.Router();
 // GET /api/export/excel
 router.get('/excel', requireAuth, async (req, res) => {
     try {
-        const db = getDb();
         const { blok, status } = req.query;
 
         let sql = `
@@ -40,12 +39,12 @@ router.get('/excel', requireAuth, async (req, res) => {
         const conditions = [];
 
         if (blok) {
-            conditions.push('UPPER(r.blok) = ?');
             params.push(blok.toUpperCase());
+            conditions.push(`UPPER(r.blok) = $${params.length}`);
         }
         if (status) {
-            conditions.push('w.status = ?');
             params.push(status);
+            conditions.push(`w.status = $${params.length}`);
         }
 
         if (conditions.length > 0) {
@@ -60,7 +59,7 @@ router.get('/excel', requireAuth, async (req, res) => {
                     ELSE 4
                  END`;
 
-        const rows = db.prepare(sql).all(...params);
+        const { rows } = await query(sql, params);
 
         // Create Excel workbook
         const workbook = new ExcelJS.Workbook();
@@ -170,9 +169,8 @@ router.get('/excel', requireAuth, async (req, res) => {
 });
 
 // GET /api/export/pdf
-router.get('/pdf', requireAuth, (req, res) => {
+router.get('/pdf', requireAuth, async (req, res) => {
     try {
-        const db = getDb();
         const { blok, status } = req.query;
 
         let sql = `
@@ -188,12 +186,12 @@ router.get('/pdf', requireAuth, (req, res) => {
         const conditions = [];
 
         if (blok) {
-            conditions.push('UPPER(r.blok) = ?');
             params.push(blok.toUpperCase());
+            conditions.push(`UPPER(r.blok) = $${params.length}`);
         }
         if (status) {
-            conditions.push('w.status = ?');
             params.push(status);
+            conditions.push(`w.status = $${params.length}`);
         } else {
             conditions.push("w.status = 'AKTIF'");
         }
@@ -210,7 +208,7 @@ router.get('/pdf', requireAuth, (req, res) => {
                     ELSE 4
                  END`;
 
-        const rows = db.prepare(sql).all(...params);
+        const { rows } = await query(sql, params);
 
         const filterText = blok ? ` Blok ${blok}` : '';
         const filename = `rekap_warga_rt02${blok ? '_' + blok : ''}_${new Date().toISOString().split('T')[0]}.pdf`;

@@ -1,5 +1,5 @@
 const express = require('express');
-const { getDb } = require('../database/db');
+const { query } = require('../database/db');
 const { requireAuth } = require('../middleware/auth');
 const multer = require('multer');
 const path = require('path');
@@ -22,9 +22,8 @@ const storage = multer.diskStorage({
 const upload = multer({ storage, limits: { fileSize: 5 * 1024 * 1024 } });
 
 // GET /api/kk - List all KK
-router.get('/', requireAuth, (req, res) => {
+router.get('/', requireAuth, async (req, res) => {
     try {
-        const db = getDb();
         const { rumah_id, status, blok } = req.query;
 
         let sql = `
@@ -38,26 +37,26 @@ router.get('/', requireAuth, (req, res) => {
         const conditions = [];
 
         if (rumah_id) {
-            conditions.push('kk.rumah_id = ?');
             params.push(rumah_id);
+            conditions.push(`kk.rumah_id = $${params.length}`);
         }
         if (status) {
-            conditions.push('kk.status = ?');
             params.push(status);
+            conditions.push(`kk.status = $${params.length}`);
         }
         if (blok) {
-            conditions.push('UPPER(r.blok) = ?');
             params.push(blok.toUpperCase());
+            conditions.push(`UPPER(r.blok) = $${params.length}`);
         }
 
         if (conditions.length > 0) {
             sql += ' WHERE ' + conditions.join(' AND ');
         }
 
-        sql += ' GROUP BY kk.id ORDER BY r.blok, CAST(r.nomor_rumah AS INTEGER), kk.nama_kepala';
+        sql += ' GROUP BY kk.id, r.blok, r.nomor_rumah ORDER BY r.blok, CAST(r.nomor_rumah AS INTEGER), kk.nama_kepala';
 
-        const rows = db.prepare(sql).all(...params);
-        res.json({ data: rows });
+        const result = await query(sql, params);
+        res.json({ data: result.rows });
     } catch (err) {
         console.error('Error fetching KK:', err);
         res.status(500).json({ error: 'Gagal memuat data KK.' });
@@ -65,28 +64,29 @@ router.get('/', requireAuth, (req, res) => {
 });
 
 // GET /api/kk/:id
-router.get('/:id', requireAuth, (req, res) => {
+router.get('/:id', requireAuth, async (req, res) => {
     try {
-        const db = getDb();
-        const kk = db.prepare(`
+        const { rows: kkRows } = await query(`
             SELECT kk.*, r.blok, r.nomor_rumah
             FROM kepala_keluarga kk
             JOIN rumah r ON kk.rumah_id = r.id
-            WHERE kk.id = ?
-        `).get(req.params.id);
+            WHERE kk.id = $1
+        `, [req.params.id]);
 
+        const kk = kkRows[0];
         if (!kk) return res.status(404).json({ error: 'KK tidak ditemukan.' });
 
         // Get anggota keluarga
-        const anggota = db.prepare(
-            `SELECT * FROM warga WHERE kk_id = ? ORDER BY
+        const { rows: anggota } = await query(
+            `SELECT * FROM warga WHERE kk_id = $1 ORDER BY
              CASE hubungan_keluarga
                 WHEN 'Kepala Keluarga' THEN 1
                 WHEN 'Istri' THEN 2
                 WHEN 'Anak' THEN 3
                 ELSE 4
-             END, nama_lengkap`
-        ).all(req.params.id);
+             END, nama_lengkap`,
+            [req.params.id]
+        );
 
         res.json({ ...kk, anggota });
     } catch (err) {
@@ -95,9 +95,8 @@ router.get('/:id', requireAuth, (req, res) => {
 });
 
 // POST /api/kk
-router.post('/', requireAuth, upload.single('foto_kk'), (req, res) => {
+router.post('/', requireAuth, upload.single('foto_kk'), async (req, res) => {
     try {
-        const db = getDb();
         const { rumah_id, nomor_kk, nama_kepala, catatan } = req.body;
 
         if (!rumah_id || !nama_kepala) {
@@ -105,30 +104,32 @@ router.post('/', requireAuth, upload.single('foto_kk'), (req, res) => {
         }
 
         // Check rumah exists
-        const rumah = db.prepare('SELECT * FROM rumah WHERE id = ?').get(rumah_id);
-        if (!rumah) return res.status(404).json({ error: 'Rumah tidak ditemukan.' });
+        const { rows: rumahRows } = await query('SELECT * FROM rumah WHERE id = $1', [rumah_id]);
+        if (!rumahRows[0]) return res.status(404).json({ error: 'Rumah tidak ditemukan.' });
 
         // Check duplicate nomor_kk
         if (nomor_kk) {
-            const dupKK = db.prepare('SELECT id FROM kepala_keluarga WHERE nomor_kk = ?').get(nomor_kk);
-            if (dupKK) return res.status(409).json({ error: 'Nomor KK sudah terdaftar.' });
+            const { rows: dupRows } = await query('SELECT id FROM kepala_keluarga WHERE nomor_kk = $1', [nomor_kk]);
+            if (dupRows.length > 0) return res.status(409).json({ error: 'Nomor KK sudah terdaftar.' });
         }
 
         const foto_kk_path = req.file ? `/uploads/kk/${req.file.filename}` : null;
 
-        const result = db.prepare(`
+        const { rows } = await query(`
             INSERT INTO kepala_keluarga (rumah_id, nomor_kk, nama_kepala, status, foto_kk_path, catatan)
-            VALUES (?, ?, ?, 'AKTIF', ?, ?)
-        `).run(rumah_id, nomor_kk || null, nama_kepala, foto_kk_path, catatan || null);
+            VALUES ($1, $2, $3, 'AKTIF', $4, $5) RETURNING id
+        `, [rumah_id, nomor_kk || null, nama_kepala, foto_kk_path, catatan || null]);
 
         // Update rumah status to TERISI
-        db.prepare("UPDATE rumah SET status = 'TERISI', updated_at = CURRENT_TIMESTAMP WHERE id = ?")
-            .run(rumah_id);
+        await query(
+            "UPDATE rumah SET status = 'TERISI', updated_at = NOW() WHERE id = $1",
+            [rumah_id]
+        );
 
         res.status(201).json({
             success: true,
             message: 'KK berhasil ditambahkan.',
-            id: result.lastInsertRowid
+            id: rows[0].id
         });
     } catch (err) {
         console.error('Error creating KK:', err);
@@ -137,34 +138,36 @@ router.post('/', requireAuth, upload.single('foto_kk'), (req, res) => {
 });
 
 // PUT /api/kk/:id
-router.put('/:id', requireAuth, upload.single('foto_kk'), (req, res) => {
+router.put('/:id', requireAuth, upload.single('foto_kk'), async (req, res) => {
     try {
-        const db = getDb();
         const { rumah_id, nomor_kk, nama_kepala, status, catatan } = req.body;
 
-        const existing = db.prepare('SELECT * FROM kepala_keluarga WHERE id = ?').get(req.params.id);
+        const { rows: existingRows } = await query('SELECT * FROM kepala_keluarga WHERE id = $1', [req.params.id]);
+        const existing = existingRows[0];
         if (!existing) return res.status(404).json({ error: 'KK tidak ditemukan.' });
 
         // Check duplicate nomor_kk (exclude current)
         if (nomor_kk && nomor_kk !== existing.nomor_kk) {
-            const dup = db.prepare('SELECT id FROM kepala_keluarga WHERE nomor_kk = ? AND id != ?')
-                .get(nomor_kk, req.params.id);
-            if (dup) return res.status(409).json({ error: 'Nomor KK sudah terdaftar.' });
+            const { rows: dupRows } = await query(
+                'SELECT id FROM kepala_keluarga WHERE nomor_kk = $1 AND id != $2',
+                [nomor_kk, req.params.id]
+            );
+            if (dupRows.length > 0) return res.status(409).json({ error: 'Nomor KK sudah terdaftar.' });
         }
 
         const foto_kk_path = req.file ? `/uploads/kk/${req.file.filename}` : existing.foto_kk_path;
 
-        db.prepare(`
+        await query(`
             UPDATE kepala_keluarga SET
-                rumah_id = COALESCE(?, rumah_id),
-                nomor_kk = ?,
-                nama_kepala = COALESCE(?, nama_kepala),
-                status = COALESCE(?, status),
-                foto_kk_path = ?,
-                catatan = ?,
-                updated_at = CURRENT_TIMESTAMP
-            WHERE id = ?
-        `).run(
+                rumah_id = COALESCE($1, rumah_id),
+                nomor_kk = $2,
+                nama_kepala = COALESCE($3, nama_kepala),
+                status = COALESCE($4, status),
+                foto_kk_path = $5,
+                catatan = $6,
+                updated_at = NOW()
+            WHERE id = $7
+        `, [
             rumah_id || null,
             nomor_kk || existing.nomor_kk,
             nama_kepala || null,
@@ -172,7 +175,7 @@ router.put('/:id', requireAuth, upload.single('foto_kk'), (req, res) => {
             foto_kk_path,
             catatan !== undefined ? catatan : existing.catatan,
             req.params.id
-        );
+        ]);
 
         res.json({ success: true, message: 'Data KK berhasil diperbarui.' });
     } catch (err) {

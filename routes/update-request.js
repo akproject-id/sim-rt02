@@ -1,5 +1,5 @@
 const express = require('express');
-const { getDb } = require('../database/db');
+const { query, getClient } = require('../database/db');
 const { requireAuth } = require('../middleware/auth');
 const { validateToken } = require('../middleware/token-auth');
 const { updateCompletenessFlag } = require('../utils/data-completeness');
@@ -7,9 +7,8 @@ const { updateCompletenessFlag } = require('../utils/data-completeness');
 const router = express.Router();
 
 // POST /api/update-request/submit/:token - Warga submits update via token
-router.post('/submit/:token', validateToken, (req, res) => {
+router.post('/submit/:token', validateToken, async (req, res) => {
     try {
-        const db = getDb();
         const tokenData = req.tokenData;
         const { updates } = req.body;
 
@@ -17,15 +16,20 @@ router.post('/submit/:token', validateToken, (req, res) => {
             return res.status(400).json({ error: 'Tidak ada data yang diupdate.' });
         }
 
-        const transaction = db.transaction(() => {
+        const client = await getClient();
+        try {
+            await client.query('BEGIN');
+
             for (const update of updates) {
                 const { warga_id, data_baru } = update;
 
                 // Verify warga belongs to this KK
-                const warga = db.prepare(
-                    'SELECT * FROM warga WHERE id = ? AND kk_id = ? AND status = ?'
-                ).get(warga_id, tokenData.kk_id, 'AKTIF');
+                const { rows: wargaRows } = await client.query(
+                    "SELECT * FROM warga WHERE id = $1 AND kk_id = $2 AND status = 'AKTIF'",
+                    [warga_id, tokenData.kk_id]
+                );
 
+                const warga = wargaRows[0];
                 if (!warga) continue;
 
                 // Build data_lama snapshot
@@ -50,19 +54,23 @@ router.post('/submit/:token', validateToken, (req, res) => {
                 );
 
                 if (hasChanges) {
-                    db.prepare(`
+                    await client.query(`
                         INSERT INTO update_request (warga_id, data_lama, data_baru, status)
-                        VALUES (?, ?, ?, 'PENDING')
-                    `).run(warga_id, JSON.stringify(data_lama), JSON.stringify(data_baru));
+                        VALUES ($1, $2, $3, 'PENDING')
+                    `, [warga_id, JSON.stringify(data_lama), JSON.stringify(data_baru)]);
                 }
             }
 
             // Mark token as used
-            db.prepare('UPDATE token_link SET is_used = 1 WHERE token = ?')
-                .run(tokenData.token);
-        });
+            await client.query('UPDATE token_link SET is_used = TRUE WHERE token = $1', [tokenData.token]);
 
-        transaction();
+            await client.query('COMMIT');
+        } catch (err) {
+            await client.query('ROLLBACK');
+            throw err;
+        } finally {
+            client.release();
+        }
 
         res.json({
             success: true,
@@ -75,9 +83,8 @@ router.post('/submit/:token', validateToken, (req, res) => {
 });
 
 // GET /api/update-request - List all update requests (admin)
-router.get('/', requireAuth, (req, res) => {
+router.get('/', requireAuth, async (req, res) => {
     try {
-        const db = getDb();
         const { status } = req.query;
 
         let sql = `
@@ -94,13 +101,13 @@ router.get('/', requireAuth, (req, res) => {
 
         const params = [];
         if (status) {
-            sql += ' WHERE ur.status = ?';
             params.push(status);
+            sql += ` WHERE ur.status = $${params.length}`;
         }
 
         sql += ' ORDER BY ur.created_at DESC';
 
-        const rows = db.prepare(sql).all(...params);
+        const { rows } = await query(sql, params);
 
         // Parse JSON fields
         const data = rows.map(r => ({
@@ -117,10 +124,9 @@ router.get('/', requireAuth, (req, res) => {
 });
 
 // GET /api/update-request/:id
-router.get('/:id', requireAuth, (req, res) => {
+router.get('/:id', requireAuth, async (req, res) => {
     try {
-        const db = getDb();
-        const request = db.prepare(`
+        const { rows } = await query(`
             SELECT ur.*, w.nama_lengkap, w.nik,
                    kk.nama_kepala, kk.nomor_kk,
                    r.blok, r.nomor_rumah
@@ -128,9 +134,10 @@ router.get('/:id', requireAuth, (req, res) => {
             JOIN warga w ON ur.warga_id = w.id
             JOIN kepala_keluarga kk ON w.kk_id = kk.id
             JOIN rumah r ON kk.rumah_id = r.id
-            WHERE ur.id = ?
-        `).get(req.params.id);
+            WHERE ur.id = $1
+        `, [req.params.id]);
 
+        const request = rows[0];
         if (!request) return res.status(404).json({ error: 'Pengajuan tidak ditemukan.' });
 
         res.json({
@@ -144,47 +151,61 @@ router.get('/:id', requireAuth, (req, res) => {
 });
 
 // PUT /api/update-request/:id/approve
-router.put('/:id/approve', requireAuth, (req, res) => {
+router.put('/:id/approve', requireAuth, async (req, res) => {
     try {
-        const db = getDb();
         const { catatan_admin } = req.body;
 
-        const request = db.prepare('SELECT * FROM update_request WHERE id = ? AND status = ?')
-            .get(req.params.id, 'PENDING');
+        const { rows: reqRows } = await query(
+            "SELECT * FROM update_request WHERE id = $1 AND status = 'PENDING'",
+            [req.params.id]
+        );
 
+        const request = reqRows[0];
         if (!request) {
             return res.status(404).json({ error: 'Pengajuan tidak ditemukan atau sudah diproses.' });
         }
 
         const dataBaru = JSON.parse(request.data_baru);
 
-        const transaction = db.transaction(() => {
-            // Apply changes to warga table
-            const updateFields = Object.keys(dataBaru)
-                .map(key => `${key} = ?`)
-                .join(', ');
-            const updateValues = Object.values(dataBaru);
+        const client = await getClient();
+        try {
+            await client.query('BEGIN');
 
-            db.prepare(`
-                UPDATE warga SET ${updateFields}, updated_at = CURRENT_TIMESTAMP
-                WHERE id = ?
-            `).run(...updateValues, request.warga_id);
+            // Apply changes to warga table
+            const keys = Object.keys(dataBaru);
+            const values = Object.values(dataBaru);
+            const updateFields = keys
+                .map((key, i) => `${key} = $${i + 1}`)
+                .join(', ');
+
+            await client.query(
+                `UPDATE warga SET ${updateFields}, updated_at = NOW() WHERE id = $${keys.length + 1}`,
+                [...values, request.warga_id]
+            );
 
             // Update completeness flag
-            updateCompletenessFlag(db, request.warga_id);
+            await updateCompletenessFlag(
+                (text, params) => client.query(text, params),
+                request.warga_id
+            );
 
             // Update request status
-            db.prepare(`
+            await client.query(`
                 UPDATE update_request SET
                     status = 'APPROVED',
-                    catatan_admin = ?,
-                    reviewed_by = ?,
-                    reviewed_at = CURRENT_TIMESTAMP
-                WHERE id = ?
-            `).run(catatan_admin || null, req.session.adminId, req.params.id);
-        });
+                    catatan_admin = $1,
+                    reviewed_by = $2,
+                    reviewed_at = NOW()
+                WHERE id = $3
+            `, [catatan_admin || null, req.session.adminId, req.params.id]);
 
-        transaction();
+            await client.query('COMMIT');
+        } catch (err) {
+            await client.query('ROLLBACK');
+            throw err;
+        } finally {
+            client.release();
+        }
 
         res.json({ success: true, message: 'Update data telah disetujui.' });
     } catch (err) {
@@ -194,30 +215,31 @@ router.put('/:id/approve', requireAuth, (req, res) => {
 });
 
 // PUT /api/update-request/:id/reject
-router.put('/:id/reject', requireAuth, (req, res) => {
+router.put('/:id/reject', requireAuth, async (req, res) => {
     try {
-        const db = getDb();
         const { catatan_admin } = req.body;
 
         if (!catatan_admin) {
             return res.status(400).json({ error: 'Alasan penolakan wajib diisi.' });
         }
 
-        const request = db.prepare('SELECT * FROM update_request WHERE id = ? AND status = ?')
-            .get(req.params.id, 'PENDING');
+        const { rows: reqRows } = await query(
+            "SELECT * FROM update_request WHERE id = $1 AND status = 'PENDING'",
+            [req.params.id]
+        );
 
-        if (!request) {
+        if (!reqRows[0]) {
             return res.status(404).json({ error: 'Pengajuan tidak ditemukan atau sudah diproses.' });
         }
 
-        db.prepare(`
+        await query(`
             UPDATE update_request SET
                 status = 'REJECTED',
-                catatan_admin = ?,
-                reviewed_by = ?,
-                reviewed_at = CURRENT_TIMESTAMP
-            WHERE id = ?
-        `).run(catatan_admin, req.session.adminId, req.params.id);
+                catatan_admin = $1,
+                reviewed_by = $2,
+                reviewed_at = NOW()
+            WHERE id = $3
+        `, [catatan_admin, req.session.adminId, req.params.id]);
 
         res.json({ success: true, message: 'Update data telah ditolak.' });
     } catch (err) {
