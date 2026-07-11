@@ -6,42 +6,51 @@ const dns = require('dns').promises;
 let pool;
 
 /**
- * Create pg Pool, resolving IPv6 if needed (Supabase IPv6-only host fix).
+ * Create pg Pool with IPv6-fallback DNS resolution and SNI preservation.
  */
 async function createPool() {
     if (pool) return pool;
 
     const dbUrl = new URL(process.env.DATABASE_URL);
-    let host = dbUrl.hostname;
+    const originalHost = dbUrl.hostname;
+    let resolvedHost = originalHost;
 
-    // Try to resolve the hostname — fallback to IPv6 for Supabase
+    // Resolve hostname to IP (handles IPv6-only hosts)
     try {
-        const { address } = await dns.lookup(host);
-        host = address;
-        console.log(`✅ DNS resolved (IPv4): ${dbUrl.hostname} → ${host}`);
+        const { address } = await dns.lookup(originalHost);
+        resolvedHost = address;
+        console.log(`✅ DNS resolved (IPv4): ${originalHost} → ${resolvedHost}`);
     } catch {
         try {
-            const addrs = await dns.resolve6(dbUrl.hostname);
-            host = addrs[0];
-            console.log(`✅ DNS resolved (IPv6): ${dbUrl.hostname} → ${host}`);
+            const addrs = await dns.resolve6(originalHost);
+            resolvedHost = addrs[0];
+            console.log(`✅ DNS resolved (IPv6): ${originalHost} → ${resolvedHost}`);
         } catch (e) {
-            console.log(`⚠️  DNS resolve failed, using hostname as-is: ${host}`);
+            console.log(`⚠️ DNS resolve failed, using hostname: ${originalHost}`);
         }
     }
 
     pool = new Pool({
-        host,
+        host: resolvedHost,
         port: parseInt(dbUrl.port) || 5432,
         database: dbUrl.pathname.slice(1),
         user: decodeURIComponent(dbUrl.username),
         password: decodeURIComponent(dbUrl.password),
         ssl: process.env.DATABASE_SSL === 'false'
             ? false
-            : { rejectUnauthorized: false }
+            : {
+                rejectUnauthorized: false,
+                servername: originalHost   // Preserve SNI for Supabase routing
+            },
+        max: 3,
+        connectionTimeoutMillis: 15000,
+        idleTimeoutMillis: 20000,
+        keepAlive: true,
+        allowExitOnIdle: true
     });
 
     pool.on('error', (err) => {
-        console.error('❌ Unexpected database pool error:', err);
+        console.error('❌ Pool error:', err.message);
     });
 
     return pool;
@@ -49,9 +58,6 @@ async function createPool() {
 
 /**
  * Execute a query using the connection pool.
- * @param {string} text - SQL query with $1, $2, ... placeholders
- * @param {Array} params - Query parameters
- * @returns {Promise<{rows: Array, rowCount: number}>}
  */
 async function query(text, params) {
     const p = await createPool();
@@ -60,7 +66,6 @@ async function query(text, params) {
 
 /**
  * Get a dedicated client from the pool (for transactions).
- * IMPORTANT: Always call client.release() in a finally block.
  */
 async function getClient() {
     const p = await createPool();
