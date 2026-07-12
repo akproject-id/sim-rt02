@@ -4,3 +4,13 @@ uploads/kk/*
 !uploads/ktp/.gitkeep
 !uploads/kk/.gitkeep
 .env
+
+# SQLite (using Supabase PostgreSQL now)
+*.db
+*.db-shm
+*.db-wal
+
+# Test files
+e2e-test.js
+conn-test.js
+dns-test.js

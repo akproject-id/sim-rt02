@@ -8,6 +8,11 @@ const { seed } = require('./database/seed');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// Trust proxy (Railway, Render, etc. use reverse proxy)
+if (process.env.NODE_ENV === 'production') {
+    app.set('trust proxy', 1);
+}
+
 // ============ MIDDLEWARE ============
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -20,8 +25,11 @@ app.use(session({
     saveUninitialized: false,
     cookie: {
         maxAge: 24 * 60 * 60 * 1000, // 24 hours
-        httpOnly: true
-    }
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production', // HTTPS only in production
+        sameSite: process.env.NODE_ENV === 'production' ? 'lax' : false
+    },
+    proxy: process.env.NODE_ENV === 'production' // Trust first proxy
 }));
 
 // Make session data available to all responses
