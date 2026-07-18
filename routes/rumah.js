@@ -33,7 +33,11 @@ router.get('/', requireAuth, async (req, res) => {
             sql += ' WHERE ' + conditions.join(' AND ');
         }
 
-        sql += ' GROUP BY r.id ORDER BY r.blok, CAST(r.nomor_rumah AS INTEGER)';
+        sql += ` GROUP BY r.id ORDER BY r.blok, 
+            CASE WHEN r.nomor_rumah ~ '^[0-9]+$' 
+                 THEN CAST(r.nomor_rumah AS INTEGER) 
+                 ELSE 999999 END, 
+            r.nomor_rumah`;
 
         const result = await query(sql, params);
 
