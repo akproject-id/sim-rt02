@@ -78,9 +78,10 @@ CREATE TABLE IF NOT EXISTS mutasi (
 );
 
 -- Tabel Update Request (Pengkinian Data Mandiri)
+-- warga_id nullable untuk support pengajuan anggota baru (NEW_MEMBER)
 CREATE TABLE IF NOT EXISTS update_request (
     id SERIAL PRIMARY KEY,
-    warga_id INTEGER NOT NULL,
+    warga_id INTEGER,               -- NULL jika type = NEW_MEMBER
     data_lama TEXT NOT NULL,
     data_baru TEXT NOT NULL,
     status VARCHAR(10) DEFAULT 'PENDING' CHECK(status IN ('PENDING', 'APPROVED', 'REJECTED')),

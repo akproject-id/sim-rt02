@@ -6,6 +6,83 @@
     <meta name="description" content="Update Data Warga RT.02">
     <title>Update Data - SIM-RT.02</title>
     <link rel="stylesheet" href="/css/style.css">
+    <style>
+        .new-member-card {
+            background: var(--bg-card);
+            border: 2px dashed var(--primary);
+            border-radius: 12px;
+            padding: 1.25rem;
+            margin-bottom: 1rem;
+            position: relative;
+            animation: slideUp 0.3s ease;
+        }
+        .new-member-card .card-header-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 1rem;
+        }
+        .new-member-label {
+            font-size: 0.75rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--primary);
+            background: rgba(99,102,241,0.12);
+            padding: 0.25rem 0.75rem;
+            border-radius: 99px;
+        }
+        .btn-remove-member {
+            background: rgba(239,68,68,0.1);
+            border: none;
+            color: var(--danger);
+            border-radius: 8px;
+            padding: 0.35rem 0.75rem;
+            font-size: 0.8rem;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        .btn-remove-member:hover { background: rgba(239,68,68,0.2); }
+        .btn-add-member {
+            width: 100%;
+            padding: 0.875rem;
+            margin: 0.5rem 0 1.5rem;
+            border: 2px dashed var(--border);
+            background: transparent;
+            border-radius: 12px;
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+        }
+        .btn-add-member:hover {
+            border-color: var(--primary);
+            color: var(--primary);
+            background: rgba(99,102,241,0.05);
+        }
+        .section-divider {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            margin: 1.5rem 0 1rem;
+            color: var(--text-muted);
+            font-size: 0.8125rem;
+        }
+        .section-divider::before, .section-divider::after {
+            content: '';
+            flex: 1;
+            height: 1px;
+            background: var(--border);
+        }
+        @keyframes slideUp {
+            from { opacity: 0; transform: translateY(12px); }
+            to   { opacity: 1; transform: translateY(0); }
+        }
+    </style>
 </head>
 <body>
     <div class="warga-container">
@@ -53,16 +130,23 @@
             </div>
 
             <p style="font-size:0.8125rem;color:var(--text-muted);margin-bottom:1rem;">
-                Silakan perbarui data anggota keluarga di bawah ini. Data yang diubah akan dikirim ke Admin RT untuk diverifikasi.
+                Perbarui data anggota keluarga di bawah ini, atau tambahkan anggota baru.
+                Semua perubahan akan dikirim ke Admin RT untuk diverifikasi.
             </p>
 
             <form id="updateForm">
-                <div id="membersContainer">
-                    <!-- Member cards will be injected here -->
-                </div>
+                <!-- Existing members -->
+                <div id="membersContainer"></div>
 
-                <button type="submit" class="btn btn-primary btn-lg btn-block" id="submitBtn" style="margin-top:1.5rem;">
-                    Kirim Perubahan Data
+                <!-- Add new member section -->
+                <div class="section-divider">Tambah Anggota Keluarga Baru</div>
+                <div id="newMembersContainer"></div>
+                <button type="button" class="btn-add-member" onclick="addNewMember()">
+                    <span style="font-size:1.2rem;">➕</span> Tambah Anggota Keluarga
+                </button>
+
+                <button type="submit" class="btn btn-primary btn-lg btn-block" id="submitBtn" style="margin-top:0.5rem;">
+                    Kirim Data ke Admin RT
                 </button>
             </form>
         </div>
@@ -72,8 +156,9 @@
             <div class="warga-success">
                 <div class="success-icon">✅</div>
                 <h2>Data Berhasil Dikirim!</h2>
-                <p style="color:var(--text-muted);font-size:0.875rem;margin-top:0.5rem;">
-                    Perubahan data Anda sudah masuk ke antrian verifikasi. Admin RT akan meninjau dan menyetujui perubahan tersebut.
+                <p style="color:var(--text-muted);font-size:0.875rem;margin-top:0.5rem;" id="successMsg">
+                    Perubahan data Anda sudah masuk ke antrian verifikasi.
+                    Admin RT akan meninjau dan menyetujui perubahan tersebut.
                 </p>
                 <p style="color:var(--text-muted);font-size:0.75rem;margin-top:1.5rem;">
                     Terima kasih atas partisipasi Anda dalam pengkinian data warga RT.02.
@@ -87,21 +172,27 @@
     <script>
         const token = window.location.pathname.split('/update/')[1];
         let originalData = {};
+        let newMemberCount = 0;
 
+        // ── AGAMA & HUBUNGAN OPTIONS ─────────────────────────────────────
+        const agamaOptions = ['Islam','Kristen','Katolik','Hindu','Buddha','Konghucu','Lainnya'];
+        const hubunganOptions = ['Kepala Keluarga','Istri','Anak','Menantu','Cucu','Orang Tua','Mertua','Famili Lain','Lainnya'];
+        const kawinOptions = ['Belum Kawin','Kawin','Cerai Hidup','Cerai Mati'];
+
+        function makeSelect(name, options, selected = '') {
+            return `<select class="form-control" name="${name}">
+                <option value="">-- Pilih --</option>
+                ${options.map(o => `<option value="${o}" ${selected === o ? 'selected' : ''}>${o}</option>`).join('')}
+            </select>`;
+        }
+
+        // ── INIT ─────────────────────────────────────────────────────────
         async function init() {
-            if (!token) {
-                showError('Link tidak valid.');
-                return;
-            }
-
+            if (!token) { showError('Link tidak valid.'); return; }
             try {
                 const res = await fetch(`/api/token/validate/${token}`);
                 const data = await res.json();
-
-                if (!res.ok) {
-                    showError(data.error || 'Link tidak valid.');
-                    return;
-                }
+                if (!res.ok) { showError(data.error || 'Link tidak valid.'); return; }
 
                 document.getElementById('kkName').textContent = data.kk.nama_kepala;
                 document.getElementById('kkAddress').textContent = `Blok ${data.kk.blok} No. ${data.kk.nomor_rumah}`;
@@ -113,10 +204,9 @@
                 });
 
                 renderMembers(data.anggota);
-
                 document.getElementById('loadingState').style.display = 'none';
                 document.getElementById('formState').style.display = 'block';
-            } catch (err) {
+            } catch {
                 showError('Gagal memvalidasi link. Periksa koneksi internet Anda.');
             }
         }
@@ -127,19 +217,17 @@
             document.getElementById('errorState').style.display = 'block';
         }
 
+        // ── RENDER EXISTING MEMBERS ──────────────────────────────────────
         function renderMembers(members) {
             const container = document.getElementById('membersContainer');
             container.innerHTML = '';
-
             members.forEach((m, idx) => {
                 originalData[m.id] = { ...m };
-
                 const card = document.createElement('div');
                 card.className = 'warga-member-card animate-slideUp';
                 card.style.animationDelay = `${idx * 0.1}s`;
                 card.innerHTML = `
-                    <h3>
-                        ${m.nama_lengkap}
+                    <h3>${m.nama_lengkap}
                         <span class="member-badge">${m.hubungan_keluarga || '-'}</span>
                     </h3>
                     <div class="form-group">
@@ -147,96 +235,178 @@
                         <input type="text" class="form-control" name="nama_lengkap_${m.id}" value="${m.nama_lengkap || ''}">
                     </div>
                     <div class="form-row">
-                        <div class="form-group">
-                            <label>Tempat Lahir</label>
+                        <div class="form-group"><label>NIK</label>
+                            <input type="text" class="form-control" name="nik_${m.id}" value="${m.nik || ''}" maxlength="16" placeholder="16 digit">
+                        </div>
+                        <div class="form-group"><label>Tempat Lahir</label>
                             <input type="text" class="form-control" name="tempat_lahir_${m.id}" value="${m.tempat_lahir || ''}">
                         </div>
-                        <div class="form-group">
-                            <label>Tanggal Lahir</label>
-                            <input type="date" class="form-control" name="tanggal_lahir_${m.id}" value="${m.tanggal_lahir || ''}">
-                        </div>
                     </div>
                     <div class="form-row">
-                        <div class="form-group">
-                            <label>Jenis Kelamin</label>
+                        <div class="form-group"><label>Tanggal Lahir</label>
+                            <input type="date" class="form-control" name="tanggal_lahir_${m.id}" value="${m.tanggal_lahir ? m.tanggal_lahir.split('T')[0] : ''}">
+                        </div>
+                        <div class="form-group"><label>Jenis Kelamin</label>
                             <select class="form-control" name="jenis_kelamin_${m.id}">
                                 <option value="">-- Pilih --</option>
-                                <option value="L" ${m.jenis_kelamin === 'L' ? 'selected' : ''}>Laki-laki</option>
-                                <option value="P" ${m.jenis_kelamin === 'P' ? 'selected' : ''}>Perempuan</option>
-                            </select>
-                        </div>
-                        <div class="form-group">
-                            <label>Agama</label>
-                            <select class="form-control" name="agama_${m.id}">
-                                <option value="">-- Pilih --</option>
-                                ${['Islam','Kristen','Katolik','Hindu','Buddha','Konghucu','Lainnya'].map(a =>
-                                    `<option value="${a}" ${m.agama === a ? 'selected' : ''}>${a}</option>`
-                                ).join('')}
+                                <option value="L" ${m.jenis_kelamin==='L'?'selected':''}>Laki-laki</option>
+                                <option value="P" ${m.jenis_kelamin==='P'?'selected':''}>Perempuan</option>
                             </select>
                         </div>
                     </div>
                     <div class="form-row">
-                        <div class="form-group">
-                            <label>Status Perkawinan</label>
-                            <select class="form-control" name="status_perkawinan_${m.id}">
-                                <option value="">-- Pilih --</option>
-                                ${['Belum Kawin','Kawin','Cerai Hidup','Cerai Mati'].map(s =>
-                                    `<option value="${s}" ${m.status_perkawinan === s ? 'selected' : ''}>${s}</option>`
-                                ).join('')}
-                            </select>
+                        <div class="form-group"><label>Agama</label>
+                            ${makeSelect(`agama_${m.id}`, agamaOptions, m.agama)}
                         </div>
-                        <div class="form-group">
-                            <label>Pendidikan</label>
+                        <div class="form-group"><label>Status Perkawinan</label>
+                            ${makeSelect(`status_perkawinan_${m.id}`, kawinOptions, m.status_perkawinan)}
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group"><label>Pendidikan</label>
                             <input type="text" class="form-control" name="pendidikan_terakhir_${m.id}" value="${m.pendidikan_terakhir || ''}" placeholder="SD/SMP/SMA/D3/S1/S2">
                         </div>
-                    </div>
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label>Pekerjaan</label>
+                        <div class="form-group"><label>Pekerjaan</label>
                             <input type="text" class="form-control" name="pekerjaan_${m.id}" value="${m.pekerjaan || ''}">
                         </div>
-                        <div class="form-group">
-                            <label>No. HP</label>
-                            <input type="tel" class="form-control" name="no_hp_${m.id}" value="${m.no_hp || ''}" placeholder="08xxxxxxxxxx">
-                        </div>
+                    </div>
+                    <div class="form-group"><label>No. HP</label>
+                        <input type="tel" class="form-control" name="no_hp_${m.id}" value="${m.no_hp || ''}" placeholder="08xxxxxxxxxx">
                     </div>
                 `;
                 container.appendChild(card);
             });
         }
 
+        // ── ADD NEW MEMBER CARD ──────────────────────────────────────────
+        function addNewMember() {
+            newMemberCount++;
+            const idx = newMemberCount;
+            const container = document.getElementById('newMembersContainer');
+            const card = document.createElement('div');
+            card.className = 'new-member-card';
+            card.id = `newMember_${idx}`;
+            card.innerHTML = `
+                <div class="card-header-row">
+                    <span class="new-member-label">✨ Anggota Baru #${idx}</span>
+                    <button type="button" class="btn-remove-member" onclick="removeNewMember(${idx})">✕ Hapus</button>
+                </div>
+                <div class="form-group">
+                    <label>Nama Lengkap <span style="color:var(--danger)">*</span></label>
+                    <input type="text" class="form-control" name="new_nama_${idx}" placeholder="Nama lengkap sesuai KTP" required>
+                </div>
+                <div class="form-row">
+                    <div class="form-group"><label>NIK</label>
+                        <input type="text" class="form-control" name="new_nik_${idx}" maxlength="16" placeholder="16 digit">
+                    </div>
+                    <div class="form-group"><label>Hubungan Keluarga <span style="color:var(--danger)">*</span></label>
+                        ${makeSelect(`new_hubungan_${idx}`, hubunganOptions)}
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group"><label>Tempat Lahir</label>
+                        <input type="text" class="form-control" name="new_tempat_lahir_${idx}" placeholder="Kota/Kabupaten">
+                    </div>
+                    <div class="form-group"><label>Tanggal Lahir</label>
+                        <input type="date" class="form-control" name="new_tanggal_lahir_${idx}">
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group"><label>Jenis Kelamin</label>
+                        <select class="form-control" name="new_jk_${idx}">
+                            <option value="">-- Pilih --</option>
+                            <option value="L">Laki-laki</option>
+                            <option value="P">Perempuan</option>
+                        </select>
+                    </div>
+                    <div class="form-group"><label>Agama</label>
+                        ${makeSelect(`new_agama_${idx}`, agamaOptions)}
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group"><label>Status Perkawinan</label>
+                        ${makeSelect(`new_kawin_${idx}`, kawinOptions)}
+                    </div>
+                    <div class="form-group"><label>Status Tinggal</label>
+                        <select class="form-control" name="new_tinggal_${idx}">
+                            <option value="TETAP">Tetap</option>
+                            <option value="KONTRAK">Kontrak</option>
+                            <option value="KOST">Kost</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group"><label>Pendidikan Terakhir</label>
+                        <input type="text" class="form-control" name="new_pendidikan_${idx}" placeholder="SD/SMP/SMA/D3/S1/S2">
+                    </div>
+                    <div class="form-group"><label>Pekerjaan</label>
+                        <input type="text" class="form-control" name="new_pekerjaan_${idx}">
+                    </div>
+                </div>
+                <div class="form-group"><label>No. HP</label>
+                    <input type="tel" class="form-control" name="new_hp_${idx}" placeholder="08xxxxxxxxxx">
+                </div>
+            `;
+            container.appendChild(card);
+            card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+
+        function removeNewMember(idx) {
+            const card = document.getElementById(`newMember_${idx}`);
+            if (card) card.remove();
+        }
+
+        // ── SUBMIT ───────────────────────────────────────────────────────
         document.getElementById('updateForm').addEventListener('submit', async (e) => {
             e.preventDefault();
             const btn = document.getElementById('submitBtn');
             btn.disabled = true;
             btn.innerHTML = '<span class="loading-spinner"></span> Mengirim...';
 
+            // Collect changes to existing members
             const updates = [];
-            const fields = ['nama_lengkap','tempat_lahir','tanggal_lahir','jenis_kelamin','agama','status_perkawinan','pendidikan_terakhir','pekerjaan','no_hp'];
-
+            const fields = ['nama_lengkap','nik','tempat_lahir','tanggal_lahir','jenis_kelamin','agama','status_perkawinan','pendidikan_terakhir','pekerjaan','no_hp'];
             for (const [wargaId, orig] of Object.entries(originalData)) {
                 const data_baru = {};
                 let hasChanges = false;
-
                 for (const field of fields) {
                     const input = document.querySelector(`[name="${field}_${wargaId}"]`);
                     if (input) {
                         const newVal = input.value || null;
-                        const oldVal = orig[field] || null;
+                        const origVal = orig[field] ? String(orig[field]).split('T')[0] : null; // normalize date
                         data_baru[field] = newVal;
-                        if (newVal !== oldVal) hasChanges = true;
+                        if (newVal !== origVal) hasChanges = true;
                     }
                 }
-
-                if (hasChanges) {
-                    updates.push({ warga_id: parseInt(wargaId), data_baru });
-                }
+                if (hasChanges) updates.push({ warga_id: parseInt(wargaId), data_baru });
             }
 
-            if (updates.length === 0) {
-                showToast('Tidak ada perubahan data.', 'warning');
+            // Collect new members
+            const new_members = [];
+            document.querySelectorAll('[id^="newMember_"]').forEach(card => {
+                const idx = card.id.split('_')[1];
+                const nama = (document.querySelector(`[name="new_nama_${idx}"]`)?.value || '').trim();
+                if (!nama) return; // skip empty cards
+                new_members.push({
+                    nama_lengkap: nama,
+                    nik: document.querySelector(`[name="new_nik_${idx}"]`)?.value || null,
+                    hubungan_keluarga: document.querySelector(`[name="new_hubungan_${idx}"]`)?.value || null,
+                    tempat_lahir: document.querySelector(`[name="new_tempat_lahir_${idx}"]`)?.value || null,
+                    tanggal_lahir: document.querySelector(`[name="new_tanggal_lahir_${idx}"]`)?.value || null,
+                    jenis_kelamin: document.querySelector(`[name="new_jk_${idx}"]`)?.value || null,
+                    agama: document.querySelector(`[name="new_agama_${idx}"]`)?.value || null,
+                    status_perkawinan: document.querySelector(`[name="new_kawin_${idx}"]`)?.value || null,
+                    status_tinggal: document.querySelector(`[name="new_tinggal_${idx}"]`)?.value || 'TETAP',
+                    pendidikan_terakhir: document.querySelector(`[name="new_pendidikan_${idx}"]`)?.value || null,
+                    pekerjaan: document.querySelector(`[name="new_pekerjaan_${idx}"]`)?.value || null,
+                    no_hp: document.querySelector(`[name="new_hp_${idx}"]`)?.value || null,
+                });
+            });
+
+            if (updates.length === 0 && new_members.length === 0) {
+                showToast('Tidak ada perubahan atau anggota baru yang diisi.', 'warning');
                 btn.disabled = false;
-                btn.innerHTML = 'Kirim Perubahan Data';
+                btn.innerHTML = 'Kirim Data ke Admin RT';
                 return;
             }
 
@@ -244,22 +414,22 @@
                 const res = await fetch(`/api/update-request/submit/${token}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ updates })
+                    body: JSON.stringify({ updates, new_members })
                 });
                 const data = await res.json();
-
                 if (res.ok && data.success) {
                     document.getElementById('formState').style.display = 'none';
+                    document.getElementById('successMsg').textContent = data.message;
                     document.getElementById('successState').style.display = 'block';
                 } else {
                     showToast(data.error || 'Gagal mengirim data.', 'error');
                     btn.disabled = false;
-                    btn.innerHTML = 'Kirim Perubahan Data';
+                    btn.innerHTML = 'Kirim Data ke Admin RT';
                 }
-            } catch (err) {
+            } catch {
                 showToast('Koneksi gagal. Coba lagi.', 'error');
                 btn.disabled = false;
-                btn.innerHTML = 'Kirim Perubahan Data';
+                btn.innerHTML = 'Kirim Data ke Admin RT';
             }
         });
 

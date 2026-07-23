@@ -987,8 +987,46 @@ function switchApprovalTab(tab, btn) {
 }
 
 function renderApprovalCard(r, isProcessed = false) {
-    const fields = ['nama_lengkap','tempat_lahir','tanggal_lahir','jenis_kelamin','agama','status_perkawinan','pendidikan_terakhir','pekerjaan','no_hp','hubungan_keluarga','status_tinggal'];
-    const labels = { nama_lengkap:'Nama', tempat_lahir:'Tempat Lahir', tanggal_lahir:'Tgl Lahir', jenis_kelamin:'L/P', agama:'Agama', status_perkawinan:'Status Kawin', pendidikan_terakhir:'Pendidikan', pekerjaan:'Pekerjaan', no_hp:'No HP', hubungan_keluarga:'Hub. Keluarga', status_tinggal:'Status Tinggal' };
+    const fields = ['nama_lengkap','nik','tempat_lahir','tanggal_lahir','jenis_kelamin','agama','status_perkawinan','pendidikan_terakhir','pekerjaan','no_hp','hubungan_keluarga','status_tinggal'];
+    const labels = { nama_lengkap:'Nama', nik:'NIK', tempat_lahir:'Tempat Lahir', tanggal_lahir:'Tgl Lahir', jenis_kelamin:'L/P', agama:'Agama', status_perkawinan:'Status Kawin', pendidikan_terakhir:'Pendidikan', pekerjaan:'Pekerjaan', no_hp:'No HP', hubungan_keluarga:'Hub. Keluarga', status_tinggal:'Status Tinggal' };
+
+    // ── NEW MEMBER card ─────────────────────────────────────────────────
+    const isNewMember = r.is_new_member || (r.data_baru && r.data_baru._type === 'NEW_MEMBER');
+    if (isNewMember) {
+        const d = r.data_baru;
+        const namaDisplay = d.nama_lengkap || '(Tanpa Nama)';
+        const alamat = (r.blok && r.nomor_rumah) ? `${r.blok}/${r.nomor_rumah}` : '';
+        const kkNama = r.nama_kepala || '-';
+        return `
+        <div class="card" style="margin-bottom:1rem;border-left:4px solid var(--primary);">
+            <div class="d-flex justify-between items-center" style="margin-bottom:1rem;">
+                <div>
+                    <div style="display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap;">
+                        <span style="background:rgba(99,102,241,0.15);color:var(--primary);font-size:0.7rem;font-weight:700;padding:0.2rem 0.6rem;border-radius:99px;text-transform:uppercase;">🆕 Anggota Baru</span>
+                        <span class="badge ${r.status === 'PENDING' ? 'badge-warning' : r.status === 'APPROVED' ? 'badge-success' : 'badge-danger'}">${r.status}</span>
+                    </div>
+                    <div class="fw-700" style="margin-top:0.4rem;">${escapeHtml(namaDisplay)}</div>
+                    <div class="text-xs text-muted">KK: ${escapeHtml(kkNama)} ${alamat ? '· ' + alamat : ''} · ${formatDateTime(r.created_at)}</div>
+                </div>
+            </div>
+            <div style="background:rgba(99,102,241,0.05);border-radius:8px;padding:0.75rem;display:grid;grid-template-columns:1fr 1fr;gap:0.5rem 1rem;">
+                ${fields.filter(f => d[f]).map(f => `
+                    <div style="font-size:0.8125rem;">
+                        <div style="color:var(--text-muted);font-size:0.7rem;">${labels[f]}</div>
+                        <div class="fw-600">${escapeHtml(String(d[f]))}</div>
+                    </div>
+                `).join('')}
+            </div>
+            ${!isProcessed ? `
+                <div style="margin-top:1rem;display:flex;gap:0.75rem;align-items:end;">
+                    <div style="flex:1;"><label class="text-xs text-muted" style="display:block;margin-bottom:0.25rem;">Catatan (wajib untuk tolak)</label>
+                        <input type="text" class="form-control" id="approvalNote_${r.id}" placeholder="Catatan admin..."></div>
+                    <button class="btn btn-success btn-sm" onclick="approveRequest(${r.id})">✅ Tambahkan</button>
+                    <button class="btn btn-danger btn-sm" onclick="rejectRequest(${r.id})">❌ Tolak</button>
+                </div>
+            ` : (r.catatan_admin ? `<div class="text-sm text-muted" style="margin-top:0.75rem;">💬 ${escapeHtml(r.catatan_admin)}</div>` : '')}
+        </div>`;
+    }
 
     const changedFields = fields.filter(f => {
         const oldVal = r.data_lama[f] || '';
