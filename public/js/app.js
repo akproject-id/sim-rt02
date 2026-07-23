@@ -513,7 +513,7 @@ function renderKKRows(rows) {
             <td class="text-sm">${kk.nomor_kk || '-'}</td>
             <td class="fw-600">${escapeHtml(kk.nama_kepala)}</td>
             <td>${kk.jumlah_anggota}</td>
-            <td><span class="badge ${kk.status === 'AKTIF' ? 'badge-success' : 'badge-danger'}">${kk.status}</span></td>
+            <td><span class="badge ${kk.status === 'AKTIF' ? 'badge-success' : (kk.status === 'TIDAK_AKTIF' ? 'badge-danger' : 'badge-warning')}">${kk.status || 'N/A'}</span></td>
             <td>
                 <div class="table-actions">
                     <button class="btn btn-ghost btn-sm" onclick="showDetailKK(${kk.id})" title="Detail">👁️</button>
@@ -718,7 +718,8 @@ async function filterWarga() {
 }
 
 async function showAddWargaModal() {
-    const kkRes = await fetch('/api/kk?status=AKTIF');
+    // Ambil semua KK (tidak filter status karena data import bisa NULL)
+    const kkRes = await fetch('/api/kk');
     const kkData = await kkRes.json();
 
     openModal('Tambah Warga Baru', renderWargaForm(null, kkData.data),
@@ -729,7 +730,7 @@ async function showAddWargaModal() {
 async function showEditWargaModal(id) {
     const wRes = await fetch(`/api/warga/${id}`);
     const w = await wRes.json();
-    const kkRes = await fetch('/api/kk?status=AKTIF');
+    const kkRes = await fetch('/api/kk');
     const kkData = await kkRes.json();
 
     openModal('Edit Data Warga', renderWargaForm(w, kkData.data),
