@@ -76,13 +76,15 @@ router.get('/', requireAuth, async (req, res) => {
         dataParams.push(parseInt(limit));
         dataParams.push(offset);
 
-        sql += ` ORDER BY r.blok, CAST(r.nomor_rumah AS INTEGER), kk.nama_kepala,
-                 CASE w.hubungan_keluarga
-                    WHEN 'Kepala Keluarga' THEN 1
-                    WHEN 'Istri' THEN 2
-                    WHEN 'Anak' THEN 3
-                    ELSE 4
-                 END
+        sql += ` ORDER BY r.blok,
+            CASE WHEN r.nomor_rumah ~ '^[0-9]+$' THEN CAST(r.nomor_rumah AS INTEGER) ELSE 999999 END,
+            r.nomor_rumah, kk.nama_kepala,
+                  CASE w.hubungan_keluarga
+                     WHEN 'Kepala Keluarga' THEN 1
+                     WHEN 'Istri' THEN 2
+                     WHEN 'Anak' THEN 3
+                     ELSE 4
+                  END
                  LIMIT $${dataParams.length - 1} OFFSET $${dataParams.length}`;
 
         const result = await query(sql, dataParams);
